@@ -1,0 +1,23 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Generated analysis and rendered videos
+runs/
+
+# Large local media is intentionally not committed.
+/yebin_image.png
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+
+# Local model weights
+*.pt
+*.onnx
+*.engine

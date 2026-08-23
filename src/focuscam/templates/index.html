@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b0c10">
+    <title>Focus Cam Studio</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Focus Cam Studio home">
+          <span class="brand-mark" aria-hidden="true"><i></i></span>
+          <span>Focus Cam <strong>Studio</strong></span>
+        </a>
+        <span class="local-badge"><i></i> Runs locally</span>
+      </header>
+
+      <section class="hero">
+        <p class="eyebrow">Manual performer tracking</p>
+        <h1>Choose the performer.<br><span>We’ll follow the motion.</span></h1>
+        <p class="lede">Analyze once, click any tracked performer, repair difficult moments, and export a smooth vertical focus cam.</p>
+      </section>
+
+      <section class="workspace" aria-label="Focus cam editor">
+        <aside class="control-panel">
+          <div class="step-card active" id="source-step">
+            <div class="step-heading">
+              <span class="step-number">01</span>
+              <div><h2>Source</h2><p>Choose a performance</p></div>
+            </div>
+            <label class="field-label" for="video-select">Video in this project</label>
+            <select id="video-select" aria-label="Video source">
+              <option value="">Loading videos…</option>
+            </select>
+            <div class="video-meta" id="video-meta"></div>
+            <button class="primary-button" id="analyze-button" disabled>
+              <span>Analyze performers</span><b aria-hidden="true">→</b>
+            </button>
+          </div>
+
+          <div class="step-card disabled" id="select-step">
+            <div class="step-heading">
+              <span class="step-number">02</span>
+              <div><h2>Selection</h2><p>Click a box in the video</p></div>
+            </div>
+            <div class="selection-state">
+              <span class="status-dot"></span>
+              <span id="selection-label">No performer selected</span>
+            </div>
+            <label class="toggle-row">
+              <input type="checkbox" id="show-tracks" checked>
+              <span class="toggle"><i></i></span>
+              <span>Show all track boxes</span>
+            </label>
+            <div class="anchors" id="anchors"></div>
+          </div>
+
+          <div class="step-card disabled" id="export-step">
+            <div class="step-heading">
+              <span class="step-number">03</span>
+              <div><h2>Export</h2><p>Frame and render</p></div>
+            </div>
+            <div class="two-fields">
+              <label><span class="field-label">Aspect</span>
+                <select id="aspect-select">
+                  <option value="9:16">9:16 vertical</option>
+                  <option value="4:5">4:5 portrait</option>
+                  <option value="1:1">1:1 square</option>
+                  <option value="16:9">16:9 landscape</option>
+                </select>
+              </label>
+              <label><span class="field-label">Framing</span>
+                <select id="padding-select">
+                  <option value="1.15">Tight</option>
+                  <option value="1.3" selected>Balanced</option>
+                  <option value="1.55">Wide</option>
+                </select>
+              </label>
+            </div>
+            <button class="primary-button coral" id="render-button" disabled>
+              <span>Render focus cam</span><b aria-hidden="true">↗</b>
+            </button>
+            <a class="download-button hidden" id="download-link" href="#" download>Download finished video</a>
+          </div>
+        </aside>
+
+        <div class="stage-column">
+          <div class="progress-card hidden" id="progress-card" role="status" aria-live="polite">
+            <div><strong id="progress-title">Analyzing performance</strong><span id="progress-percent">0%</span></div>
+            <div class="progress-track"><i id="progress-bar"></i></div>
+            <p id="progress-message">Preparing…</p>
+          </div>
+
+          <div class="video-stage" id="video-stage">
+            <video id="video" controls playsinline preload="metadata"></video>
+            <canvas id="overlay" aria-label="Tracked performer selection overlay"></canvas>
+            <div class="empty-stage" id="empty-stage">
+              <span class="frame-icon" aria-hidden="true"></span>
+              <strong>Select a performance to begin</strong>
+              <p>The original video stays on this computer.</p>
+            </div>
+            <div class="stage-hint hidden" id="stage-hint">Pause, then click the performer to follow</div>
+          </div>
+
+          <section class="track-section hidden" id="track-section">
+            <div class="section-title">
+              <div><p class="eyebrow">Detected performers</p><h2>Track gallery</h2></div>
+              <span id="track-count"></span>
+            </div>
+            <p class="track-help">Choose a card or click a box in the video. If tracking changes after an overlap, seek there and click the correct performer again.</p>
+            <div class="track-grid" id="track-grid"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+    <script src="{{ url_for('static', filename='app.js') }}" defer></script>
+  </body>
+</html>
