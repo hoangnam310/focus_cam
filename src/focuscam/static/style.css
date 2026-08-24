@@ -82,6 +82,9 @@ select:focus { border-color: var(--acid); }
 .download-button { justify-content: center; background: transparent; color: var(--ink); border: 1px solid var(--line); }
 .secondary-button { width: 100%; margin-top: 10px; border: 1px solid var(--line); border-radius: 9px; padding: 10px 12px; background: transparent; color: var(--ink); font-size: 12px; }
 .secondary-button:hover:not(:disabled), .secondary-button[aria-pressed="true"] { border-color: var(--acid); color: var(--acid); background: rgba(216,255,86,.05); }
+.selection-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 10px; }
+.selection-actions .secondary-button { margin-top: 0; }
+.offscreen-button:hover:not(:disabled) { border-color: var(--coral); color: var(--coral); background: rgba(255,111,97,.05); }
 
 .selection-state { padding: 11px; border-radius: 9px; background: #0e1014; color: var(--muted); font-size: 12px; display: flex; gap: 9px; align-items: center; }
 .selection-state.chosen { color: var(--ink); }
@@ -95,6 +98,7 @@ select:focus { border-color: var(--acid); }
 .toggle-row input:checked + .toggle i { background: #15170f; transform: translateX(13px); }
 .anchors { display: grid; gap: 6px; margin-top: 13px; }
 .anchor { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; background: rgba(255,255,255,.04); border-radius: 8px; padding: 8px 9px; font-size: 11px; }
+.anchor.absent { border-left: 2px solid var(--coral); color: #ffc0ba; }
 .anchor button { border: 0; color: var(--muted); background: transparent; padding: 2px 4px; }
 .anchor button:hover { color: var(--coral); }
 .two-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

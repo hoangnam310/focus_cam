@@ -49,13 +49,23 @@
               <span class="status-dot"></span>
               <span id="selection-label">No performer selected</span>
             </div>
-            <button class="secondary-button" id="pick-button" type="button" aria-pressed="false" disabled>
-              Select performer on video
-            </button>
+            <div class="selection-actions">
+              <button class="secondary-button" id="pick-button" type="button" aria-pressed="false" disabled>
+                Select performer
+              </button>
+              <button class="secondary-button offscreen-button" id="absent-button" type="button" disabled>
+                Mark off-screen
+              </button>
+            </div>
             <label class="toggle-row">
               <input type="checkbox" id="show-tracks" checked>
               <span class="toggle"><i></i></span>
               <span>Show all track boxes</span>
+            </label>
+            <label class="toggle-row">
+              <input type="checkbox" id="show-crop" checked>
+              <span class="toggle"><i></i></span>
+              <span>Preview output crop</span>
             </label>
             <div class="anchors" id="anchors"></div>
           </div>
@@ -112,7 +122,7 @@
               <div><p class="eyebrow">Detected performers</p><h2>Track gallery</h2></div>
               <span id="track-count"></span>
             </div>
-            <p class="track-help">Choose a card or click a box in the video. If tracking changes after an overlap, seek there and click the correct performer again.</p>
+            <p class="track-help">Seek to a transition, then choose the correct card or box. Mark sections where the performer leaves the shot as off-screen.</p>
             <div class="track-grid" id="track-grid"></div>
           </section>
         </div>

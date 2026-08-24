@@ -4,6 +4,7 @@ const state = {
   analysis: null,
   anchors: [],
   showTracks: true,
+  showCrop: true,
   selectionMode: false,
   activeJob: null,
 };
@@ -13,9 +14,10 @@ const elements = {
   videoSelect: $("#video-select"), videoMeta: $("#video-meta"), analyze: $("#analyze-button"),
   video: $("#video"), stage: $("#video-stage"), empty: $("#empty-stage"), canvas: $("#overlay"),
   hint: $("#stage-hint"), selectStep: $("#select-step"), exportStep: $("#export-step"),
-  pick: $("#pick-button"),
+  pick: $("#pick-button"), absent: $("#absent-button"),
   selectionLabel: $("#selection-label"), selectionState: $(".selection-state"),
-  showTracks: $("#show-tracks"), anchors: $("#anchors"), aspect: $("#aspect-select"),
+  showTracks: $("#show-tracks"), showCrop: $("#show-crop"),
+  anchors: $("#anchors"), aspect: $("#aspect-select"),
   padding: $("#padding-select"), render: $("#render-button"), download: $("#download-link"),
   progressCard: $("#progress-card"), progressTitle: $("#progress-title"),
   progressPercent: $("#progress-percent"), progressBar: $("#progress-bar"),
@@ -78,6 +80,7 @@ function selectVideo(name) {
   elements.stage.classList.add("ready");
   setSelectionMode(false);
   elements.pick.disabled = true;
+  elements.absent.disabled = true;
   elements.empty.classList.add("hidden");
   elements.analyze.disabled = false;
   elements.analyze.querySelector("span").textContent = video.analyzed ? "Open analysis" : "Analyze performers";
@@ -129,13 +132,16 @@ async function watchJob(jobId, title) {
 async function loadAnalysis(identifier) {
   setProgress("Opening analysis", 1, "Loading tracks…");
   state.analysis = await requestJSON(`/api/analyses/${identifier}`);
+  restoreTimeline();
   state.selectedVideo.analyzed = true;
   elements.analyze.disabled = false;
   elements.analyze.querySelector("span").textContent = "Analysis ready";
   elements.selectStep.classList.remove("disabled");
   elements.pick.disabled = false;
+  elements.absent.disabled = false;
   setSelectionMode(false);
   elements.trackSection.classList.remove("hidden");
+  renderSelection();
   renderTrackGallery();
   hideProgress();
   drawOverlay();
@@ -149,14 +155,46 @@ function currentFrame() {
   ));
 }
 
-function activeTrackAt(frame) {
+function timelineKey() {
+  return state.analysis ? `focuscam:timeline:${state.analysis.analysis_id}` : null;
+}
+
+function persistTimeline() {
+  const key = timelineKey();
+  if (key) localStorage.setItem(key, JSON.stringify(state.anchors));
+}
+
+function restoreTimeline() {
+  state.anchors = [];
+  const key = timelineKey();
+  if (!key) return;
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "[]");
+    if (!Array.isArray(saved)) return;
+    state.anchors = saved
+      .filter((anchor) => Number.isInteger(anchor.frame) && anchor.frame >= 0 && anchor.frame < state.analysis.frames.length)
+      .map((anchor) => anchor.mode === "absent" || anchor.track_id === null
+        ? { frame: anchor.frame, track_id: null, mode: "absent" }
+        : { frame: anchor.frame, track_id: Number(anchor.track_id) })
+      .filter((anchor) => anchor.track_id === null || Number.isInteger(anchor.track_id))
+      .sort((left, right) => left.frame - right.frame);
+  } catch (error) {
+    console.warn("Could not restore the saved focus-cam timeline", error);
+  }
+}
+
+function activeSegmentAt(frame) {
   if (!state.anchors.length) return null;
-  let active = state.anchors[0].track_id;
+  let active = state.anchors[0];
   for (const anchor of state.anchors) {
     if (anchor.frame > frame) break;
-    active = anchor.track_id;
+    active = anchor;
   }
   return active;
+}
+
+function activeTrackAt(frame) {
+  return activeSegmentAt(frame)?.track_id ?? null;
 }
 
 function chooseTrack(trackId, frame = currentFrame()) {
@@ -164,6 +202,19 @@ function chooseTrack(trackId, frame = currentFrame()) {
   state.anchors = state.anchors.filter((anchor) => anchor.frame !== frame);
   state.anchors.push({ frame, track_id: Number(trackId) });
   state.anchors.sort((left, right) => left.frame - right.frame);
+  persistTimeline();
+  setSelectionMode(false);
+  renderSelection();
+  drawOverlay();
+}
+
+function markAbsent(frame = currentFrame()) {
+  if (!state.analysis) return;
+  if (!state.anchors.length) frame = 0;
+  state.anchors = state.anchors.filter((anchor) => anchor.frame !== frame);
+  state.anchors.push({ frame, track_id: null, mode: "absent" });
+  state.anchors.sort((left, right) => left.frame - right.frame);
+  persistTimeline();
   setSelectionMode(false);
   renderSelection();
   drawOverlay();
@@ -173,25 +224,28 @@ function setSelectionMode(enabled) {
   state.selectionMode = Boolean(enabled && state.analysis);
   elements.stage.classList.toggle("picking", state.selectionMode);
   elements.pick.setAttribute("aria-pressed", String(state.selectionMode));
-  elements.pick.textContent = state.selectionMode ? "Cancel selection" : "Select performer on video";
+  elements.pick.textContent = state.selectionMode ? "Cancel selection" : "Select performer";
   elements.hint.classList.toggle("hidden", !state.selectionMode);
   if (state.selectionMode) elements.video.pause();
 }
 
 function renderSelection() {
-  const hasSelection = state.anchors.length > 0;
-  elements.selectionState.classList.toggle("chosen", hasSelection);
-  elements.exportStep.classList.toggle("disabled", !hasSelection);
-  elements.render.disabled = !hasSelection;
+  const hasTimeline = state.anchors.length > 0;
+  const hasTarget = state.anchors.some((anchor) => anchor.track_id !== null);
+  elements.selectionState.classList.toggle("chosen", hasTimeline);
+  elements.exportStep.classList.toggle("disabled", !hasTarget);
+  elements.render.disabled = !hasTarget;
   elements.anchors.replaceChildren();
   state.anchors.forEach((anchor, index) => {
     const row = document.createElement("div");
-    row.className = "anchor";
+    const absent = anchor.track_id === null;
+    row.className = `anchor${absent ? " absent" : ""}`;
     const time = anchor.frame / state.analysis.source.fps;
-    row.innerHTML = `<span>${index === 0 ? "Start" : formatTime(time)} · Track ${anchor.track_id}</span><button type="button" aria-label="Remove correction">×</button>`;
+    const target = absent ? "Performer off-screen" : `Track ${anchor.track_id}`;
+    row.innerHTML = `<span>${index === 0 ? "Start" : formatTime(time)} · ${target}</span><button type="button" aria-label="Remove correction">×</button>`;
     row.querySelector("span").addEventListener("click", () => { elements.video.currentTime = time; });
     row.querySelector("button").addEventListener("click", () => {
-      state.anchors.splice(index, 1); renderSelection(); drawOverlay(); renderTrackGallery();
+      state.anchors.splice(index, 1); persistTimeline(); renderSelection(); drawOverlay(); renderTrackGallery();
     });
     elements.anchors.append(row);
   });
@@ -200,8 +254,11 @@ function renderSelection() {
 }
 
 function updateActiveLabels() {
-  const active = activeTrackAt(currentFrame());
-  elements.selectionLabel.textContent = state.anchors.length ? `Following track ${active}` : "No performer selected";
+  const segment = activeSegmentAt(currentFrame());
+  const active = segment?.track_id ?? null;
+  elements.selectionLabel.textContent = !segment
+    ? "No performer selected"
+    : active === null ? "Performer marked off-screen" : `Following track ${active}`;
   document.querySelectorAll(".track-card").forEach((card) => {
     card.classList.toggle("selected", Number(card.dataset.trackId) === active);
   });
@@ -223,7 +280,6 @@ function renderTrackGallery() {
     const image = track.thumbnail ? `/api/analyses/${state.analysis.analysis_id}/assets/${track.thumbnail}` : "";
     card.innerHTML = `${image ? `<img src="${image}" alt="Track ${track.track_id} sample">` : ""}<div><strong>Track ${track.track_id}</strong><span>${formatTime(track.observations / state.analysis.source.fps)}</span></div>`;
     card.addEventListener("click", () => {
-      elements.video.currentTime = track.thumbnail_frame / state.analysis.source.fps;
       elements.video.pause();
       chooseTrack(track.track_id, currentFrame());
     });
@@ -248,6 +304,114 @@ function colorFor(trackId, alpha = 1) {
   return `hsla(${hue}, 88%, 68%, ${alpha})`;
 }
 
+function clamp(value, minimum, maximum) {
+  return Math.min(maximum, Math.max(minimum, value));
+}
+
+function outputAspect() {
+  const [width, height] = elements.aspect.value.split(":").map(Number);
+  return width / height;
+}
+
+function previewBoxAt(frameIndex, trackId) {
+  if (trackId === null) return null;
+  const find = (index) => state.analysis.frames[index]?.detections
+    .find((detection) => detection.track_id === trackId)?.bbox || null;
+  const exact = find(frameIndex);
+  if (exact) return exact;
+
+  const maxGap = Math.max(1, Math.round(state.analysis.source.fps * 1.2));
+  let before = null;
+  let after = null;
+  for (let offset = 1; offset <= maxGap && (!before || !after); offset += 1) {
+    const earlier = frameIndex - offset;
+    const later = frameIndex + offset;
+    if (!before && earlier >= 0 && activeTrackAt(earlier) === trackId) {
+      const bbox = find(earlier);
+      if (bbox) before = { index: earlier, bbox };
+    }
+    if (!after && later < state.analysis.frames.length && activeTrackAt(later) === trackId) {
+      const bbox = find(later);
+      if (bbox) after = { index: later, bbox };
+    }
+  }
+  if (before && after) {
+    const fraction = (frameIndex - before.index) / (after.index - before.index);
+    return before.bbox.map((value, index) => value + (after.bbox[index] - value) * fraction);
+  }
+  return before?.bbox || after?.bbox || null;
+}
+
+function previewCrop(bbox) {
+  const sourceWidth = state.analysis.source.width;
+  const sourceHeight = state.analysis.source.height;
+  const aspect = outputAspect();
+  const padding = Number(elements.padding.value);
+  const maximumHeight = Math.min(sourceHeight, sourceWidth / aspect);
+  const minimumHeight = maximumHeight * .34;
+
+  if (!bbox) {
+    return {
+      left: (sourceWidth - maximumHeight * aspect) / 2,
+      top: (sourceHeight - maximumHeight) / 2,
+      width: maximumHeight * aspect,
+      height: maximumHeight,
+    };
+  }
+
+  const [x1, y1, x2, y2] = bbox.map(Number);
+  const personHeight = Math.max(1, y2 - y1);
+  const personWidth = Math.max(1, x2 - x1);
+  const safeTop = Math.max(0, y1 - personHeight * .12);
+  const safeBottom = Math.min(sourceHeight, y2 + personHeight * .04);
+  const safeLeft = Math.max(0, x1 - personWidth * .06);
+  const safeRight = Math.min(sourceWidth, x2 + personWidth * .06);
+  const requiredHeight = Math.max(safeBottom - safeTop, (safeRight - safeLeft) / aspect);
+  const height = clamp(Math.max(personHeight * padding, requiredHeight), minimumHeight, maximumHeight);
+  const width = height * aspect;
+  let centerX = (x1 + x2) / 2;
+  let centerY = (y1 + y2) / 2 - personHeight * Math.max(0, padding - 1) * .18;
+
+  const verticalLower = safeBottom - height / 2;
+  const verticalUpper = safeTop + height / 2;
+  centerY = verticalLower <= verticalUpper
+    ? clamp(centerY, verticalLower, verticalUpper)
+    : safeTop + height / 2;
+  centerX = clamp(centerX, width / 2, sourceWidth - width / 2);
+  centerY = clamp(centerY, height / 2, sourceHeight - height / 2);
+  return { left: centerX - width / 2, top: centerY - height / 2, width, height };
+}
+
+function drawCropFrame(context, geometry, bbox, absent) {
+  const crop = previewCrop(bbox);
+  const sourceWidth = state.analysis.source.width;
+  const sourceHeight = state.analysis.source.height;
+  const x = geometry.offsetX + crop.left * geometry.scale;
+  const y = geometry.offsetY + crop.top * geometry.scale;
+  const width = crop.width * geometry.scale;
+  const height = crop.height * geometry.scale;
+
+  context.save();
+  context.fillStyle = "rgba(0, 0, 0, .38)";
+  context.beginPath();
+  context.rect(geometry.offsetX, geometry.offsetY, sourceWidth * geometry.scale, sourceHeight * geometry.scale);
+  context.rect(x, y, width, height);
+  context.fill("evenodd");
+  context.strokeStyle = "#ff6f61";
+  context.lineWidth = 2.5;
+  context.setLineDash([8, 5]);
+  context.strokeRect(x, y, width, height);
+  context.setLineDash([]);
+  context.font = "700 10px ui-monospace, monospace";
+  const label = absent ? " WIDE · OFF-SCREEN " : ` OUTPUT ${elements.aspect.value} `;
+  const labelWidth = context.measureText(label).width;
+  context.fillStyle = "#ff6f61";
+  context.fillRect(x, y, labelWidth + 7, 18);
+  context.fillStyle = "#160c0a";
+  context.fillText(label, x + 3, y + 13);
+  context.restore();
+}
+
 function drawOverlay() {
   const rect = elements.canvas.getBoundingClientRect();
   const ratio = window.devicePixelRatio || 1;
@@ -258,11 +422,16 @@ function drawOverlay() {
   const context = elements.canvas.getContext("2d");
   context.setTransform(ratio, 0, 0, ratio, 0, 0);
   context.clearRect(0, 0, rect.width, rect.height);
-  if (!state.analysis || !state.showTracks) return;
+  if (!state.analysis) return;
 
   const geometry = displayGeometry();
   const frame = state.analysis.frames[currentFrame()];
-  const active = activeTrackAt(frame.index);
+  const segment = activeSegmentAt(frame.index);
+  const active = segment?.track_id ?? null;
+  if (state.showCrop && segment) {
+    drawCropFrame(context, geometry, previewBoxAt(frame.index, active), active === null);
+  }
+  if (!state.showTracks) return;
   frame.detections.forEach((detection) => {
     const [x1, y1, x2, y2] = detection.bbox;
     const x = geometry.offsetX + x1 * geometry.scale;
@@ -323,7 +492,11 @@ function finishRender(result) {
 elements.videoSelect.addEventListener("change", (event) => selectVideo(event.target.value));
 elements.analyze.addEventListener("click", analyzeSelectedVideo);
 elements.pick.addEventListener("click", () => setSelectionMode(!state.selectionMode));
+elements.absent.addEventListener("click", () => markAbsent());
 elements.showTracks.addEventListener("change", () => { state.showTracks = elements.showTracks.checked; drawOverlay(); });
+elements.showCrop.addEventListener("change", () => { state.showCrop = elements.showCrop.checked; drawOverlay(); });
+elements.aspect.addEventListener("change", drawOverlay);
+elements.padding.addEventListener("change", drawOverlay);
 elements.render.addEventListener("click", renderVideo);
 elements.canvas.addEventListener("click", handleCanvasClick);
 elements.video.addEventListener("timeupdate", () => { drawOverlay(); updateActiveLabels(); });

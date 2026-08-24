@@ -10,7 +10,7 @@ import numpy as np
 @dataclass(frozen=True)
 class Anchor:
     frame: int
-    track_id: int
+    track_id: int | None
 
 
 def parse_aspect(value: str) -> float:
@@ -30,10 +30,13 @@ def normalize_anchors(raw_anchors: list[dict[str, Any]], frame_count: int) -> li
     by_frame: dict[int, Anchor] = {}
     for raw in raw_anchors:
         frame = int(raw["frame"])
-        track_id = int(raw["track_id"])
         if frame < 0 or frame >= frame_count:
             raise ValueError(f"Anchor frame {frame} is outside the analyzed video")
-        if track_id < 0:
+        mode = raw.get("mode", "track")
+        if mode not in {"track", "absent"}:
+            raise ValueError(f"Unknown timeline mode: {mode}")
+        track_id = None if mode == "absent" or raw.get("track_id") is None else int(raw["track_id"])
+        if track_id is not None and track_id < 0:
             raise ValueError("Track IDs must be non-negative")
         by_frame[frame] = Anchor(frame=frame, track_id=track_id)
 
@@ -44,23 +47,32 @@ def normalize_anchors(raw_anchors: list[dict[str, Any]], frame_count: int) -> li
     return anchors
 
 
-def selected_boxes(
-    frames: list[dict[str, Any]], raw_anchors: list[dict[str, Any]]
-) -> list[list[float] | None]:
-    anchors = normalize_anchors(raw_anchors, len(frames))
-    output: list[list[float] | None] = []
+def selected_track_ids(raw_anchors: list[dict[str, Any]], frame_count: int) -> list[int | None]:
+    anchors = normalize_anchors(raw_anchors, frame_count)
+    output: list[int | None] = []
     anchor_index = 0
     active_track = anchors[0].track_id
 
-    for frame_index, frame in enumerate(frames):
+    for frame_index in range(frame_count):
         while anchor_index + 1 < len(anchors) and anchors[anchor_index + 1].frame <= frame_index:
             anchor_index += 1
             active_track = anchors[anchor_index].track_id
+        output.append(active_track)
+    return output
+
+
+def selected_boxes(
+    frames: list[dict[str, Any]], raw_anchors: list[dict[str, Any]]
+) -> list[list[float] | None]:
+    track_ids = selected_track_ids(raw_anchors, len(frames))
+    output: list[list[float] | None] = []
+
+    for frame, active_track in zip(frames, track_ids, strict=True):
         match = next(
             (
                 detection["bbox"]
                 for detection in frame.get("detections", [])
-                if int(detection["track_id"]) == active_track
+                if active_track is not None and int(detection["track_id"]) == active_track
             ),
             None,
         )
@@ -131,6 +143,7 @@ def build_camera_windows(
     if not 1.0 <= padding <= 2.5:
         raise ValueError("Padding must be between 1.0 and 2.5")
 
+    track_ids = selected_track_ids(raw_anchors, len(frames))
     boxes = selected_boxes(frames, raw_anchors)
     count = len(boxes)
     center_x = np.full(count, np.nan, dtype=np.float64)
@@ -139,7 +152,12 @@ def build_camera_windows(
     maximum_height = min(float(frame_height), float(frame_width) / aspect)
     minimum_height = maximum_height * 0.34
 
-    for index, bbox in enumerate(boxes):
+    for index, (bbox, track_id) in enumerate(zip(boxes, track_ids, strict=True)):
+        if track_id is None:
+            center_x[index] = frame_width / 2.0
+            center_y[index] = frame_height / 2.0
+            crop_height[index] = maximum_height
+            continue
         if bbox is None:
             continue
         x1, y1, x2, y2 = (float(value) for value in bbox)
@@ -180,6 +198,11 @@ def build_camera_windows(
             required_height = max(safe_bottom - safe_top, (safe_right - safe_left) / aspect)
             height = float(np.clip(max(height, required_height), minimum_height, maximum_height))
             width = height * aspect
+
+            # Keep the detected performer horizontally centered whenever the
+            # source has room. At an edge, clamping moves them as close to the
+            # center as the available pixels allow.
+            cx = (x1 + x2) / 2.0
 
             vertical_lower = safe_bottom - height / 2.0
             vertical_upper = safe_top + height / 2.0
