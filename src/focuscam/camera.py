@@ -214,6 +214,28 @@ def _smooth(values: np.ndarray, alpha: float) -> np.ndarray:
     return (forward + backward) / 2.0
 
 
+def _rolling_median(values: np.ndarray, radius: int) -> np.ndarray:
+    if radius <= 0:
+        return values.copy()
+    filtered = values.copy()
+    for index in range(len(values)):
+        start = max(0, index - radius)
+        stop = min(len(values), index + radius + 1)
+        filtered[index] = float(np.median(values[start:stop]))
+    return filtered
+
+
+def _rolling_maximum(values: np.ndarray, radius: int) -> np.ndarray:
+    if radius <= 0:
+        return values.copy()
+    filtered = values.copy()
+    for index in range(len(values)):
+        start = max(0, index - radius)
+        stop = min(len(values), index + radius + 1)
+        filtered[index] = float(np.max(values[start:stop]))
+    return filtered
+
+
 def build_camera_windows(
     frames: list[dict[str, Any]],
     raw_anchors: list[dict[str, Any]],
@@ -246,20 +268,31 @@ def build_camera_windows(
             continue
         x1, y1, x2, y2 = (float(value) for value in bbox)
         person_height = max(1.0, y2 - y1)
+        person_width = max(1.0, x2 - x1)
         extra_padding = max(0.0, padding - 1.0)
         center_x[index] = (x1 + x2) / 2.0
         # Put roughly two-thirds of the extra vertical room above the performer.
         # Faces are visually less forgiving than feet when detections move quickly.
         center_y[index] = (y1 + y2) / 2.0 - person_height * extra_padding * 0.18
-        crop_height[index] = np.clip(person_height * padding, minimum_height, maximum_height)
+        # A small hysteresis band lets the performer move inside the output
+        # without making the virtual camera chase every detection pixel.
+        safe_height = person_height * 1.20
+        safe_width_as_height = person_width * 1.12 / aspect
+        crop_height[index] = np.clip(
+            max(person_height * padding, safe_height, safe_width_as_height),
+            minimum_height,
+            maximum_height,
+        )
 
     max_gap = max(1, round(fps * 1.2))
     center_x = _fill_missing(center_x, frame_width / 2.0, max_gap)
     center_y = _fill_missing(center_y, frame_height / 2.0, max_gap)
     crop_height = _fill_missing(crop_height, maximum_height, max_gap)
-    center_x = _smooth(center_x, alpha=0.18)
-    center_y = _smooth(center_y, alpha=0.18)
-    crop_height = _smooth(crop_height, alpha=0.10)
+    center_x = _smooth(_rolling_median(center_x, radius=2), alpha=0.12)
+    center_y = _smooth(_rolling_median(center_y, radius=2), alpha=0.12)
+    crop_height = _rolling_median(crop_height, radius=2)
+    crop_height = _rolling_maximum(crop_height, radius=max(1, round(fps * 0.12)))
+    crop_height = _smooth(crop_height, alpha=0.08)
 
     windows: list[tuple[int, int, int, int]] = []
     for index, (cx, cy, height) in enumerate(zip(center_x, center_y, crop_height, strict=True)):
@@ -283,11 +316,6 @@ def build_camera_windows(
             height = float(np.clip(max(height, required_height), minimum_height, maximum_height))
             width = height * aspect
 
-            # Keep the detected performer horizontally centered whenever the
-            # source has room. At an edge, clamping moves them as close to the
-            # center as the available pixels allow.
-            cx = (x1 + x2) / 2.0
-
             vertical_lower = safe_bottom - height / 2.0
             vertical_upper = safe_top + height / 2.0
             cy = (
@@ -297,6 +325,9 @@ def build_camera_windows(
             )
             horizontal_lower = safe_right - width / 2.0
             horizontal_upper = safe_left + width / 2.0
+            # Preserve the smoothed camera center while the performer remains
+            # inside the safety envelope. Move only when an edge would be cut;
+            # forcing the raw detector center here turns box noise into shake.
             cx = (
                 float(np.clip(cx, horizontal_lower, horizontal_upper))
                 if horizontal_lower <= horizontal_upper

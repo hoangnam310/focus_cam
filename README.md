@@ -12,6 +12,7 @@ The local browser interface supports:
 - an incomplete-timeline warning when a selected track ends before the performance;
 - explicit off-screen segments that ease to a centered wide-stage frame;
 - a live output-crop preview centered on the selected bounding box;
+- a cinematic camera path that suppresses detector jitter while keeping the performer safe;
 - draggable, resizable crop corrections that keep the chosen aspect ratio;
 - 9:16, 4:5, 1:1, and 16:9 H.264 exports with the original audio.
 

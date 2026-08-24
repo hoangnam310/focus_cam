@@ -117,6 +117,47 @@ def test_camera_centers_performer_or_clamps_at_source_edge() -> None:
     assert edge_left + edge_width / 2 > 20
 
 
+def test_camera_path_suppresses_detector_jitter() -> None:
+    noise = [-5, 4, -3, 5, 0, -4, 3]
+    frames = []
+    for index in range(120):
+        horizontal = noise[index % len(noise)]
+        size = noise[(index * 3) % len(noise)]
+        frames.append(
+            {
+                "index": index,
+                "detections": [
+                    {
+                        "track_id": 3,
+                        "bbox": [
+                            150 + horizontal,
+                            100 + horizontal / 2,
+                            250 + horizontal,
+                            400 + horizontal / 2 + size,
+                        ],
+                    }
+                ],
+            }
+        )
+
+    windows = build_camera_windows(
+        frames,
+        [{"frame": 0, "track_id": 3}],
+        frame_width=500,
+        frame_height=600,
+        fps=30,
+        aspect=9 / 16,
+        padding=1.15,
+    )
+    stable = windows[10:-10]
+    centers_x = [left + width / 2 for left, _, width, _ in stable]
+    centers_y = [top + height / 2 for _, top, _, height in stable]
+    heights = [height for _, _, _, height in stable]
+    assert max(centers_x) - min(centers_x) <= 2
+    assert max(centers_y) - min(centers_y) <= 2
+    assert max(heights) - min(heights) <= 2
+
+
 def test_offscreen_segment_eases_to_wide_centered_frame() -> None:
     frames = [
         {"index": index, "detections": [{"track_id": 3, "bbox": [20, 50, 60, 150]}]}
