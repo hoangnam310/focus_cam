@@ -92,6 +92,19 @@
                 </select>
               </label>
             </div>
+            <button class="secondary-button crop-button" id="crop-button" type="button" aria-pressed="false" disabled>
+              Adjust crop on video
+            </button>
+            <div class="manual-crop-controls hidden" id="crop-controls">
+              <label for="crop-scale">
+                <span class="field-label">Manual crop size</span>
+                <span id="crop-scale-value">100%</span>
+              </label>
+              <input id="crop-scale" type="range" min="0.6" max="1.6" step="0.01" value="1">
+              <p>Drag the coral frame on the paused video. Size and position apply from this moment forward.</p>
+              <button class="secondary-button" id="crop-auto-button" type="button">Return to auto framing</button>
+            </div>
+            <div class="crop-anchors" id="crop-anchors"></div>
             <button class="primary-button coral" id="render-button" disabled>
               <span>Render focus cam</span><b aria-hidden="true">↗</b>
             </button>

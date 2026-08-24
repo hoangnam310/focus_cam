@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .camera import build_camera_windows, parse_aspect
+from .camera import apply_crop_overrides, build_camera_windows, parse_aspect
 from .storage import write_json
 from .video import even
 
@@ -30,6 +30,7 @@ def render_focus_cam(
     *,
     aspect_name: str = "9:16",
     padding: float = 1.3,
+    crop_anchors: list[dict[str, Any]] | None = None,
     progress: ProgressCallback | None = None,
 ) -> Path:
     import cv2
@@ -48,6 +49,13 @@ def render_focus_cam(
         fps=fps,
         aspect=aspect,
         padding=padding,
+    )
+    windows = apply_crop_overrides(
+        windows,
+        crop_anchors or [],
+        frame_width=frame_width,
+        frame_height=frame_height,
+        aspect=aspect,
     )
     output_width, output_height = _output_size(frame_width, frame_height, aspect)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -134,6 +142,7 @@ def render_focus_cam(
             "source": video_path.name,
             "analysis_id": analysis["analysis_id"],
             "anchors": anchors,
+            "crop_anchors": crop_anchors or [],
             "aspect": aspect_name,
             "padding": padding,
             "output": {

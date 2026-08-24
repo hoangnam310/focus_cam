@@ -11,6 +11,7 @@ The local browser interface supports:
 - a persistent timeline of track changes after overlaps or cuts;
 - explicit off-screen segments that ease to a centered wide-stage frame;
 - a live output-crop preview centered on the selected bounding box;
+- draggable, resizable crop corrections that keep the chosen aspect ratio;
 - 9:16, 4:5, 1:1, and 16:9 H.264 exports with the original audio.
 
 ## Requirements
@@ -51,11 +52,15 @@ performers**. After analysis:
    a correction anchor from that point forward.
 4. When the performer leaves the shot, pause and click **Mark off-screen**. Select the new
    track when they return.
-5. Review the coral output-crop preview, choose the framing, and render the focus cam.
+5. Review the coral output-crop preview and choose the framing. For a manual correction,
+   pause at the desired moment, click **Adjust crop on video**, drag the coral frame, and
+   resize it with the slider. The correction follows the automatic camera motion from that
+   moment forward; use **Return to auto framing** when it should end.
+6. Render the focus cam.
 
-Analysis files, thumbnails, and exports are written under `runs/`. The manual timeline is
-saved in local browser storage for each analysis. Source media, model weights, and generated
-files are ignored by Git.
+Analysis files, thumbnails, and exports are written under `runs/`. The performer timeline
+and manual crop corrections are saved in local browser storage for each analysis. Source
+media, model weights, and generated files are ignored by Git.
 
 ## Command-line analysis
 

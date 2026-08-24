@@ -145,6 +145,9 @@ def create_app(settings: Settings | None = None) -> Flask:
         anchors = payload.get("anchors")
         if not isinstance(anchors, list):
             raise TypeError("anchors must be a list")
+        crop_anchors = payload.get("crop_anchors", [])
+        if not isinstance(crop_anchors, list):
+            raise TypeError("crop_anchors must be a list")
         aspect = str(payload.get("aspect", "9:16"))
         padding = float(payload.get("padding", 1.3))
         render_id = uuid.uuid4().hex[:10]
@@ -159,6 +162,7 @@ def create_app(settings: Settings | None = None) -> Flask:
                 output_path,
                 aspect_name=aspect,
                 padding=padding,
+                crop_anchors=crop_anchors,
                 progress=progress,
             )
             return {

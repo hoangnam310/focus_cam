@@ -102,6 +102,18 @@ select:focus { border-color: var(--acid); }
 .anchor button { border: 0; color: var(--muted); background: transparent; padding: 2px 4px; }
 .anchor button:hover { color: var(--coral); }
 .two-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.crop-button[aria-pressed="true"] { border-color: var(--coral); color: var(--coral); background: rgba(255,111,97,.05); }
+.manual-crop-controls { margin-top: 10px; padding: 11px; border: 1px solid rgba(255,111,97,.28); border-radius: 9px; background: rgba(255,111,97,.05); }
+.manual-crop-controls > label { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 11px; }
+.manual-crop-controls .field-label { margin: 0; }
+.manual-crop-controls input[type="range"] { width: 100%; accent-color: var(--coral); }
+.manual-crop-controls p { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.manual-crop-controls .secondary-button { margin-top: 9px; }
+.crop-anchors { display: grid; gap: 6px; margin-top: 9px; }
+.crop-anchor { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; padding: 7px 9px; border-radius: 8px; border-left: 2px solid var(--coral); background: rgba(255,255,255,.04); color: #ffc0ba; font-size: 10px; }
+.crop-anchor.auto { border-left-color: var(--acid); color: var(--muted); }
+.crop-anchor button { border: 0; color: var(--muted); background: transparent; padding: 2px 4px; }
+.crop-anchor button:hover { color: var(--coral); }
 
 .stage-column { min-width: 0; display: grid; gap: 18px; }
 .progress-card { border: 1px solid rgba(122,162,255,.25); background: rgba(122,162,255,.07); padding: 14px 16px; border-radius: 12px; }
@@ -115,6 +127,7 @@ select:focus { border-color: var(--acid); }
 .video-stage.ready video { display: block; }
 .video-stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .video-stage.picking canvas { pointer-events: auto; cursor: crosshair; }
+.video-stage.adjusting canvas { pointer-events: auto; cursor: move; touch-action: none; }
 .empty-stage { display: grid; place-items: center; gap: 9px; color: var(--muted); text-align: center; }
 .empty-stage strong { color: #d4d1ca; font-size: 14px; }
 .empty-stage p { margin: 0; font-size: 12px; }

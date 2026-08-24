@@ -3,9 +3,13 @@ const state = {
   selectedVideo: null,
   analysis: null,
   anchors: [],
+  cropAnchors: [],
   showTracks: true,
   showCrop: true,
   selectionMode: false,
+  cropMode: false,
+  cropEditFrame: null,
+  cropDrag: null,
   activeJob: null,
 };
 
@@ -18,7 +22,10 @@ const elements = {
   selectionLabel: $("#selection-label"), selectionState: $(".selection-state"),
   showTracks: $("#show-tracks"), showCrop: $("#show-crop"),
   anchors: $("#anchors"), aspect: $("#aspect-select"),
-  padding: $("#padding-select"), render: $("#render-button"), download: $("#download-link"),
+  padding: $("#padding-select"), crop: $("#crop-button"), cropControls: $("#crop-controls"),
+  cropScale: $("#crop-scale"), cropScaleValue: $("#crop-scale-value"),
+  cropAuto: $("#crop-auto-button"), cropAnchors: $("#crop-anchors"),
+  render: $("#render-button"), download: $("#download-link"),
   progressCard: $("#progress-card"), progressTitle: $("#progress-title"),
   progressPercent: $("#progress-percent"), progressBar: $("#progress-bar"),
   progressMessage: $("#progress-message"), trackSection: $("#track-section"),
@@ -71,6 +78,7 @@ function selectVideo(name) {
   state.selectedVideo = state.videos.find((video) => video.path === name) || null;
   state.analysis = null;
   state.anchors = [];
+  state.cropAnchors = [];
   elements.download.classList.add("hidden");
   renderSelection();
   if (!state.selectedVideo) return;
@@ -79,6 +87,7 @@ function selectVideo(name) {
   elements.video.src = `/media/${encodeURIComponent(video.path)}`;
   elements.stage.classList.add("ready");
   setSelectionMode(false);
+  setCropMode(false);
   elements.pick.disabled = true;
   elements.absent.disabled = true;
   elements.empty.classList.add("hidden");
@@ -161,23 +170,43 @@ function timelineKey() {
 
 function persistTimeline() {
   const key = timelineKey();
-  if (key) localStorage.setItem(key, JSON.stringify(state.anchors));
+  if (key) localStorage.setItem(key, JSON.stringify({
+    anchors: state.anchors,
+    crop_anchors: state.cropAnchors,
+  }));
 }
 
 function restoreTimeline() {
   state.anchors = [];
+  state.cropAnchors = [];
   const key = timelineKey();
   if (!key) return;
   try {
     const saved = JSON.parse(localStorage.getItem(key) || "[]");
-    if (!Array.isArray(saved)) return;
-    state.anchors = saved
+    const savedAnchors = Array.isArray(saved) ? saved : saved.anchors;
+    const savedCropAnchors = Array.isArray(saved) ? [] : saved.crop_anchors;
+    if (!Array.isArray(savedAnchors)) return;
+    state.anchors = savedAnchors
       .filter((anchor) => Number.isInteger(anchor.frame) && anchor.frame >= 0 && anchor.frame < state.analysis.frames.length)
       .map((anchor) => anchor.mode === "absent" || anchor.track_id === null
         ? { frame: anchor.frame, track_id: null, mode: "absent" }
         : { frame: anchor.frame, track_id: Number(anchor.track_id) })
       .filter((anchor) => anchor.track_id === null || Number.isInteger(anchor.track_id))
       .sort((left, right) => left.frame - right.frame);
+    if (Array.isArray(savedCropAnchors)) {
+      state.cropAnchors = savedCropAnchors
+        .filter((anchor) => Number.isInteger(anchor.frame) && anchor.frame >= 0 && anchor.frame < state.analysis.frames.length)
+        .map((anchor) => anchor.mode === "auto"
+          ? { frame: anchor.frame, mode: "auto" }
+          : {
+            frame: anchor.frame,
+            mode: "manual",
+            offset_x: clamp(Number(anchor.offset_x) || 0, -2, 2),
+            offset_y: clamp(Number(anchor.offset_y) || 0, -2, 2),
+            scale: clamp(Number(anchor.scale) || 1, .5, 2),
+          })
+        .sort((left, right) => left.frame - right.frame);
+    }
   } catch (error) {
     console.warn("Could not restore the saved focus-cam timeline", error);
   }
@@ -195,6 +224,42 @@ function activeSegmentAt(frame) {
 
 function activeTrackAt(frame) {
   return activeSegmentAt(frame)?.track_id ?? null;
+}
+
+function cropAnchorAt(frame) {
+  let active = null;
+  for (const anchor of state.cropAnchors) {
+    if (anchor.frame > frame) break;
+    active = anchor;
+  }
+  return active;
+}
+
+function activeCropAt(frame) {
+  const anchor = cropAnchorAt(frame);
+  return anchor?.mode === "manual" ? anchor : null;
+}
+
+function upsertCropAnchor(frame, values, save = true) {
+  state.cropAnchors = state.cropAnchors.filter((anchor) => anchor.frame !== frame);
+  const anchor = { frame, ...values };
+  state.cropAnchors.push(anchor);
+  state.cropAnchors.sort((left, right) => left.frame - right.frame);
+  if (save) persistTimeline();
+  return anchor;
+}
+
+function ensureManualCropAnchor() {
+  const frame = state.cropEditFrame ?? currentFrame();
+  const existing = state.cropAnchors.find((anchor) => anchor.frame === frame);
+  if (existing?.mode === "manual") return existing;
+  const inherited = activeCropAt(frame);
+  return upsertCropAnchor(frame, {
+    mode: "manual",
+    offset_x: inherited?.offset_x || 0,
+    offset_y: inherited?.offset_y || 0,
+    scale: inherited?.scale || 1,
+  });
 }
 
 function chooseTrack(trackId, frame = currentFrame()) {
@@ -221,6 +286,7 @@ function markAbsent(frame = currentFrame()) {
 }
 
 function setSelectionMode(enabled) {
+  if (enabled) setCropMode(false);
   state.selectionMode = Boolean(enabled && state.analysis);
   elements.stage.classList.toggle("picking", state.selectionMode);
   elements.pick.setAttribute("aria-pressed", String(state.selectionMode));
@@ -229,12 +295,39 @@ function setSelectionMode(enabled) {
   if (state.selectionMode) elements.video.pause();
 }
 
+function setCropMode(enabled) {
+  const hasTarget = state.anchors.some((anchor) => anchor.track_id !== null);
+  state.cropMode = Boolean(enabled && state.analysis && hasTarget);
+  state.cropDrag = null;
+  elements.stage.classList.toggle("adjusting", state.cropMode);
+  elements.crop.setAttribute("aria-pressed", String(state.cropMode));
+  elements.crop.textContent = state.cropMode ? "Done adjusting crop" : "Adjust crop on video";
+  elements.cropControls.classList.toggle("hidden", !state.cropMode);
+  if (!state.cropMode) return;
+
+  state.selectionMode = false;
+  elements.stage.classList.remove("picking");
+  elements.pick.setAttribute("aria-pressed", "false");
+  elements.pick.textContent = "Select performer";
+  elements.hint.classList.add("hidden");
+  elements.video.pause();
+  state.cropEditFrame = currentFrame();
+  state.showCrop = true;
+  elements.showCrop.checked = true;
+  const inherited = activeCropAt(state.cropEditFrame);
+  elements.cropScale.value = inherited?.scale || 1;
+  elements.cropScaleValue.textContent = `${Math.round(Number(elements.cropScale.value) * 100)}%`;
+  drawOverlay();
+}
+
 function renderSelection() {
   const hasTimeline = state.anchors.length > 0;
   const hasTarget = state.anchors.some((anchor) => anchor.track_id !== null);
+  if (!hasTarget && state.cropMode) setCropMode(false);
   elements.selectionState.classList.toggle("chosen", hasTimeline);
   elements.exportStep.classList.toggle("disabled", !hasTarget);
   elements.render.disabled = !hasTarget;
+  elements.crop.disabled = !hasTarget;
   elements.anchors.replaceChildren();
   state.anchors.forEach((anchor, index) => {
     const row = document.createElement("div");
@@ -249,8 +342,31 @@ function renderSelection() {
     });
     elements.anchors.append(row);
   });
+  renderCropAnchors();
   renderTrackGallery();
   updateActiveLabels();
+}
+
+function renderCropAnchors() {
+  elements.cropAnchors.replaceChildren();
+  if (!state.analysis) return;
+  state.cropAnchors.forEach((anchor, index) => {
+    const row = document.createElement("div");
+    row.className = `crop-anchor${anchor.mode === "auto" ? " auto" : ""}`;
+    const time = anchor.frame / state.analysis.source.fps;
+    const label = anchor.mode === "auto"
+      ? "Auto framing"
+      : `Manual crop · ${Math.round(anchor.scale * 100)}%`;
+    row.innerHTML = `<span>${formatTime(time)} · ${label}</span><button type="button" aria-label="Remove crop correction">×</button>`;
+    row.querySelector("span").addEventListener("click", () => { elements.video.currentTime = time; });
+    row.querySelector("button").addEventListener("click", () => {
+      state.cropAnchors.splice(index, 1);
+      persistTimeline();
+      renderCropAnchors();
+      drawOverlay();
+    });
+    elements.cropAnchors.append(row);
+  });
 }
 
 function updateActiveLabels() {
@@ -382,8 +498,25 @@ function previewCrop(bbox) {
   return { left: centerX - width / 2, top: centerY - height / 2, width, height };
 }
 
-function drawCropFrame(context, geometry, bbox, absent) {
-  const crop = previewCrop(bbox);
+function applyPreviewCropOverride(crop, override) {
+  if (!override) return crop;
+  const sourceWidth = state.analysis.source.width;
+  const sourceHeight = state.analysis.source.height;
+  const aspect = outputAspect();
+  const maximumHeight = Math.min(sourceHeight, sourceWidth / aspect);
+  const minimumHeight = Math.max(64, maximumHeight * .18);
+  const height = clamp(crop.height * override.scale, minimumHeight, maximumHeight);
+  const width = height * aspect;
+  let centerX = crop.left + crop.width / 2 + override.offset_x * crop.width;
+  let centerY = crop.top + crop.height / 2 + override.offset_y * crop.height;
+  centerX = clamp(centerX, width / 2, sourceWidth - width / 2);
+  centerY = clamp(centerY, height / 2, sourceHeight - height / 2);
+  return { left: centerX - width / 2, top: centerY - height / 2, width, height };
+}
+
+function drawCropFrame(context, geometry, bbox, absent, frameIndex) {
+  const override = activeCropAt(frameIndex);
+  const crop = applyPreviewCropOverride(previewCrop(bbox), override);
   const sourceWidth = state.analysis.source.width;
   const sourceHeight = state.analysis.source.height;
   const x = geometry.offsetX + crop.left * geometry.scale;
@@ -403,7 +536,9 @@ function drawCropFrame(context, geometry, bbox, absent) {
   context.strokeRect(x, y, width, height);
   context.setLineDash([]);
   context.font = "700 10px ui-monospace, monospace";
-  const label = absent ? " WIDE · OFF-SCREEN " : ` OUTPUT ${elements.aspect.value} `;
+  const label = override
+    ? ` MANUAL ${elements.aspect.value} `
+    : absent ? " WIDE · OFF-SCREEN " : ` OUTPUT ${elements.aspect.value} `;
   const labelWidth = context.measureText(label).width;
   context.fillStyle = "#ff6f61";
   context.fillRect(x, y, labelWidth + 7, 18);
@@ -429,7 +564,7 @@ function drawOverlay() {
   const segment = activeSegmentAt(frame.index);
   const active = segment?.track_id ?? null;
   if (state.showCrop && segment) {
-    drawCropFrame(context, geometry, previewBoxAt(frame.index, active), active === null);
+    drawCropFrame(context, geometry, previewBoxAt(frame.index, active), active === null, frame.index);
   }
   if (!state.showTracks) return;
   frame.detections.forEach((detection) => {
@@ -464,6 +599,84 @@ function handleCanvasClick(event) {
   if (matches.length) chooseTrack(matches[0].track_id);
 }
 
+function handleCropPointerDown(event) {
+  if (!state.analysis || !state.cropMode) return;
+  const frameIndex = currentFrame();
+  const segment = activeSegmentAt(frameIndex);
+  if (!segment) return;
+  const geometry = displayGeometry();
+  const rect = elements.canvas.getBoundingClientRect();
+  const sourceX = (event.clientX - rect.left - geometry.offsetX) / geometry.scale;
+  const sourceY = (event.clientY - rect.top - geometry.offsetY) / geometry.scale;
+  const activeTrack = segment.track_id ?? null;
+  const baseCrop = previewCrop(previewBoxAt(frameIndex, activeTrack));
+  const inherited = activeCropAt(frameIndex) || {
+    offset_x: 0, offset_y: 0, scale: 1,
+  };
+  const displayedCrop = applyPreviewCropOverride(baseCrop, inherited);
+  const inside = sourceX >= displayedCrop.left && sourceX <= displayedCrop.left + displayedCrop.width
+    && sourceY >= displayedCrop.top && sourceY <= displayedCrop.top + displayedCrop.height;
+  if (!inside) return;
+
+  state.cropEditFrame = frameIndex;
+  state.cropDrag = {
+    pointerId: event.pointerId,
+    startClientX: event.clientX,
+    startClientY: event.clientY,
+    offsetX: inherited.offset_x,
+    offsetY: inherited.offset_y,
+    scale: inherited.scale,
+    baseWidth: baseCrop.width,
+    baseHeight: baseCrop.height,
+  };
+  elements.canvas.setPointerCapture(event.pointerId);
+}
+
+function handleCropPointerMove(event) {
+  const drag = state.cropDrag;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const geometry = displayGeometry();
+  const offsetX = clamp(
+    drag.offsetX + (event.clientX - drag.startClientX) / geometry.scale / drag.baseWidth,
+    -2,
+    2,
+  );
+  const offsetY = clamp(
+    drag.offsetY + (event.clientY - drag.startClientY) / geometry.scale / drag.baseHeight,
+    -2,
+    2,
+  );
+  upsertCropAnchor(state.cropEditFrame, {
+    mode: "manual", offset_x: offsetX, offset_y: offsetY, scale: drag.scale,
+  }, false);
+  drawOverlay();
+}
+
+function finishCropDrag(event) {
+  if (!state.cropDrag || state.cropDrag.pointerId !== event.pointerId) return;
+  state.cropDrag = null;
+  persistTimeline();
+  renderCropAnchors();
+}
+
+function updateManualCropScale() {
+  const scale = Number(elements.cropScale.value);
+  const anchor = ensureManualCropAnchor();
+  anchor.scale = scale;
+  elements.cropScaleValue.textContent = `${Math.round(scale * 100)}%`;
+  persistTimeline();
+  renderCropAnchors();
+  drawOverlay();
+}
+
+function returnToAutomaticCrop() {
+  const frame = state.cropEditFrame ?? currentFrame();
+  upsertCropAnchor(frame, { mode: "auto" });
+  setCropMode(false);
+  renderCropAnchors();
+  drawOverlay();
+}
+
 async function renderVideo() {
   elements.render.disabled = true;
   elements.download.classList.add("hidden");
@@ -472,6 +685,7 @@ async function renderVideo() {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         analysis_id: state.analysis.analysis_id, anchors: state.anchors,
+        crop_anchors: state.cropAnchors,
         aspect: elements.aspect.value, padding: Number(elements.padding.value),
       }),
     });
@@ -493,17 +707,24 @@ elements.videoSelect.addEventListener("change", (event) => selectVideo(event.tar
 elements.analyze.addEventListener("click", analyzeSelectedVideo);
 elements.pick.addEventListener("click", () => setSelectionMode(!state.selectionMode));
 elements.absent.addEventListener("click", () => markAbsent());
+elements.crop.addEventListener("click", () => setCropMode(!state.cropMode));
+elements.cropScale.addEventListener("input", updateManualCropScale);
+elements.cropAuto.addEventListener("click", returnToAutomaticCrop);
 elements.showTracks.addEventListener("change", () => { state.showTracks = elements.showTracks.checked; drawOverlay(); });
 elements.showCrop.addEventListener("change", () => { state.showCrop = elements.showCrop.checked; drawOverlay(); });
 elements.aspect.addEventListener("change", drawOverlay);
 elements.padding.addEventListener("change", drawOverlay);
 elements.render.addEventListener("click", renderVideo);
 elements.canvas.addEventListener("click", handleCanvasClick);
+elements.canvas.addEventListener("pointerdown", handleCropPointerDown);
+elements.canvas.addEventListener("pointermove", handleCropPointerMove);
+elements.canvas.addEventListener("pointerup", finishCropDrag);
+elements.canvas.addEventListener("pointercancel", finishCropDrag);
 elements.video.addEventListener("timeupdate", () => { drawOverlay(); updateActiveLabels(); });
-elements.video.addEventListener("play", () => setSelectionMode(false));
+elements.video.addEventListener("play", () => { setSelectionMode(false); setCropMode(false); });
 elements.video.addEventListener("seeked", drawOverlay);
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape") setSelectionMode(false);
+  if (event.key === "Escape") { setSelectionMode(false); setCropMode(false); }
 });
 window.addEventListener("resize", drawOverlay);
 

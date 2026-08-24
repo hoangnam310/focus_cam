@@ -3,8 +3,10 @@ from __future__ import annotations
 import pytest
 
 from focuscam.camera import (
+    apply_crop_overrides,
     build_camera_windows,
     normalize_anchors,
+    normalize_crop_anchors,
     parse_aspect,
     selected_boxes,
     selected_track_ids,
@@ -138,6 +140,48 @@ def test_offscreen_segment_eases_to_wide_centered_frame() -> None:
     assert height >= 195
     assert left == pytest.approx(0, abs=3)
     assert top == pytest.approx(0, abs=3)
+
+
+def test_manual_crop_override_moves_and_resizes_auto_window() -> None:
+    windows = [(50, 40, 100, 160)] * 5
+    adjusted = apply_crop_overrides(
+        windows,
+        [{"frame": 2, "mode": "manual", "offset_x": 0.25, "offset_y": -0.1, "scale": 0.75}],
+        frame_width=300,
+        frame_height=300,
+        aspect=100 / 160,
+    )
+    assert adjusted[:2] == windows[:2]
+    left, top, width, height = adjusted[2]
+    assert width == pytest.approx(75, abs=1)
+    assert height == pytest.approx(120, abs=1)
+    assert left + width / 2 == pytest.approx(125, abs=1)
+    assert top + height / 2 == pytest.approx(104, abs=1)
+
+
+def test_manual_crop_can_return_to_auto_and_stays_inside_source() -> None:
+    windows = [(0, 20, 100, 160)] * 5
+    adjusted = apply_crop_overrides(
+        windows,
+        [
+            {"frame": 1, "mode": "manual", "offset_x": -1.0, "offset_y": 0, "scale": 1.5},
+            {"frame": 3, "mode": "auto"},
+        ],
+        frame_width=200,
+        frame_height=300,
+        aspect=100 / 160,
+    )
+    assert adjusted[0] == windows[0]
+    assert adjusted[3:] == windows[3:]
+    for left, top, width, height in adjusted:
+        assert left >= 0 and top >= 0
+        assert left + width <= 200
+        assert top + height <= 300
+
+
+def test_manual_crop_validation_rejects_invalid_scale() -> None:
+    with pytest.raises(ValueError, match="scale"):
+        normalize_crop_anchors([{"frame": 0, "scale": 3}], frame_count=1)
 
 
 def test_missing_track_is_rejected() -> None:

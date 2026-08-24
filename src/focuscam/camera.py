@@ -13,6 +13,15 @@ class Anchor:
     track_id: int | None
 
 
+@dataclass(frozen=True)
+class CropAnchor:
+    frame: int
+    mode: str
+    offset_x: float = 0.0
+    offset_y: float = 0.0
+    scale: float = 1.0
+
+
 def parse_aspect(value: str) -> float:
     try:
         width, height = (float(part) for part in value.split(":", maxsplit=1))
@@ -77,6 +86,81 @@ def selected_boxes(
             None,
         )
         output.append(match)
+    return output
+
+
+def normalize_crop_anchors(raw_anchors: list[dict[str, Any]], frame_count: int) -> list[CropAnchor]:
+    by_frame: dict[int, CropAnchor] = {}
+    for raw in raw_anchors:
+        frame = int(raw["frame"])
+        if frame < 0 or frame >= frame_count:
+            raise ValueError(f"Crop anchor frame {frame} is outside the analyzed video")
+        mode = str(raw.get("mode", "manual"))
+        if mode not in {"manual", "auto"}:
+            raise ValueError(f"Unknown crop mode: {mode}")
+        if mode == "auto":
+            by_frame[frame] = CropAnchor(frame=frame, mode=mode)
+            continue
+        scale = float(raw.get("scale", 1.0))
+        if not 0.5 <= scale <= 2.0:
+            raise ValueError("Manual crop scale must be between 0.5 and 2.0")
+        offset_x = float(raw.get("offset_x", 0.0))
+        offset_y = float(raw.get("offset_y", 0.0))
+        if not -2.0 <= offset_x <= 2.0 or not -2.0 <= offset_y <= 2.0:
+            raise ValueError("Manual crop offsets must be between -2.0 and 2.0")
+        by_frame[frame] = CropAnchor(
+            frame=frame,
+            mode=mode,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            scale=scale,
+        )
+    return sorted(by_frame.values(), key=lambda anchor: anchor.frame)
+
+
+def apply_crop_overrides(
+    windows: list[tuple[int, int, int, int]],
+    raw_anchors: list[dict[str, Any]],
+    *,
+    frame_width: int,
+    frame_height: int,
+    aspect: float,
+) -> list[tuple[int, int, int, int]]:
+    anchors = normalize_crop_anchors(raw_anchors, len(windows))
+    if not anchors:
+        return windows
+
+    maximum_height = min(float(frame_height), float(frame_width) / aspect)
+    minimum_height = max(64.0, maximum_height * 0.18)
+    output: list[tuple[int, int, int, int]] = []
+    anchor_index = 0
+    active: CropAnchor | None = None
+
+    for frame_index, (left, top, width, height) in enumerate(windows):
+        while anchor_index < len(anchors) and anchors[anchor_index].frame <= frame_index:
+            active = anchors[anchor_index]
+            anchor_index += 1
+        if active is None or active.mode == "auto":
+            output.append((left, top, width, height))
+            continue
+
+        center_x = left + width / 2.0 + active.offset_x * width
+        center_y = top + height / 2.0 + active.offset_y * height
+        adjusted_height = float(np.clip(height * active.scale, minimum_height, maximum_height))
+        adjusted_width = adjusted_height * aspect
+        center_x = float(
+            np.clip(center_x, adjusted_width / 2.0, frame_width - adjusted_width / 2.0)
+        )
+        center_y = float(
+            np.clip(center_y, adjusted_height / 2.0, frame_height - adjusted_height / 2.0)
+        )
+        adjusted_width_int = max(2, round(adjusted_width))
+        adjusted_height_int = max(2, round(adjusted_height))
+        adjusted_left = round(center_x - adjusted_width / 2.0)
+        adjusted_top = round(center_y - adjusted_height / 2.0)
+        adjusted_left = min(max(0, adjusted_left), frame_width - adjusted_width_int)
+        adjusted_top = min(max(0, adjusted_top), frame_height - adjusted_height_int)
+        output.append((adjusted_left, adjusted_top, adjusted_width_int, adjusted_height_int))
     return output
 
 
