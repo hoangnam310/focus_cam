@@ -4,6 +4,7 @@ const state = {
   analysis: null,
   anchors: [],
   showTracks: true,
+  selectionMode: false,
   activeJob: null,
 };
 
@@ -12,6 +13,7 @@ const elements = {
   videoSelect: $("#video-select"), videoMeta: $("#video-meta"), analyze: $("#analyze-button"),
   video: $("#video"), stage: $("#video-stage"), empty: $("#empty-stage"), canvas: $("#overlay"),
   hint: $("#stage-hint"), selectStep: $("#select-step"), exportStep: $("#export-step"),
+  pick: $("#pick-button"),
   selectionLabel: $("#selection-label"), selectionState: $(".selection-state"),
   showTracks: $("#show-tracks"), anchors: $("#anchors"), aspect: $("#aspect-select"),
   padding: $("#padding-select"), render: $("#render-button"), download: $("#download-link"),
@@ -74,7 +76,8 @@ function selectVideo(name) {
   const video = state.selectedVideo;
   elements.video.src = `/media/${encodeURIComponent(video.path)}`;
   elements.stage.classList.add("ready");
-  elements.stage.classList.remove("selectable");
+  setSelectionMode(false);
+  elements.pick.disabled = true;
   elements.empty.classList.add("hidden");
   elements.analyze.disabled = false;
   elements.analyze.querySelector("span").textContent = video.analyzed ? "Open analysis" : "Analyze performers";
@@ -130,8 +133,8 @@ async function loadAnalysis(identifier) {
   elements.analyze.disabled = false;
   elements.analyze.querySelector("span").textContent = "Analysis ready";
   elements.selectStep.classList.remove("disabled");
-  elements.stage.classList.add("selectable");
-  elements.hint.classList.remove("hidden");
+  elements.pick.disabled = false;
+  setSelectionMode(false);
   elements.trackSection.classList.remove("hidden");
   renderTrackGallery();
   hideProgress();
@@ -161,8 +164,18 @@ function chooseTrack(trackId, frame = currentFrame()) {
   state.anchors = state.anchors.filter((anchor) => anchor.frame !== frame);
   state.anchors.push({ frame, track_id: Number(trackId) });
   state.anchors.sort((left, right) => left.frame - right.frame);
+  setSelectionMode(false);
   renderSelection();
   drawOverlay();
+}
+
+function setSelectionMode(enabled) {
+  state.selectionMode = Boolean(enabled && state.analysis);
+  elements.stage.classList.toggle("picking", state.selectionMode);
+  elements.pick.setAttribute("aria-pressed", String(state.selectionMode));
+  elements.pick.textContent = state.selectionMode ? "Cancel selection" : "Select performer on video";
+  elements.hint.classList.toggle("hidden", !state.selectionMode);
+  if (state.selectionMode) elements.video.pause();
 }
 
 function renderSelection() {
@@ -197,7 +210,9 @@ function updateActiveLabels() {
 function renderTrackGallery() {
   if (!state.analysis) return;
   const active = activeTrackAt(currentFrame());
-  const galleryTracks = state.analysis.tracks.filter((track) => track.gallery !== false);
+  const galleryTracks = state.analysis.tracks
+    .filter((track) => track.gallery !== false)
+    .sort((left, right) => right.observations - left.observations);
   elements.trackCount.textContent = `${galleryTracks.length} track${galleryTracks.length === 1 ? "" : "s"}`;
   elements.trackGrid.replaceChildren();
   galleryTracks.forEach((track) => {
@@ -269,7 +284,7 @@ function drawOverlay() {
 }
 
 function handleCanvasClick(event) {
-  if (!state.analysis) return;
+  if (!state.analysis || !state.selectionMode) return;
   const rect = elements.canvas.getBoundingClientRect();
   const geometry = displayGeometry();
   const sourceX = (event.clientX - rect.left - geometry.offsetX) / geometry.scale;
@@ -307,11 +322,16 @@ function finishRender(result) {
 
 elements.videoSelect.addEventListener("change", (event) => selectVideo(event.target.value));
 elements.analyze.addEventListener("click", analyzeSelectedVideo);
+elements.pick.addEventListener("click", () => setSelectionMode(!state.selectionMode));
 elements.showTracks.addEventListener("change", () => { state.showTracks = elements.showTracks.checked; drawOverlay(); });
 elements.render.addEventListener("click", renderVideo);
 elements.canvas.addEventListener("click", handleCanvasClick);
 elements.video.addEventListener("timeupdate", () => { drawOverlay(); updateActiveLabels(); });
+elements.video.addEventListener("play", () => setSelectionMode(false));
 elements.video.addEventListener("seeked", drawOverlay);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setSelectionMode(false);
+});
 window.addEventListener("resize", drawOverlay);
 
 loadVideos();

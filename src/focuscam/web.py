@@ -32,6 +32,20 @@ def _safe_asset(base: Path, relative: str) -> Path:
     return candidate
 
 
+def _analysis_matches_settings(path: Path, settings: Settings) -> bool:
+    if not path.is_file():
+        return False
+    try:
+        payload = read_json(path)
+    except (OSError, ValueError):
+        return False
+    return (
+        payload.get("model") == settings.model
+        and payload.get("tracker") == settings.tracker
+        and int(payload.get("image_size", 0)) == settings.image_size
+    )
+
+
 def create_app(settings: Settings | None = None) -> Flask:
     settings = settings or Settings.from_environment()
     settings.runs_dir.mkdir(parents=True, exist_ok=True)
@@ -58,7 +72,9 @@ def create_app(settings: Settings | None = None) -> Flask:
             except (OSError, ValueError):
                 continue
             identifier = analysis_id(path)
-            analyzed = (run_dir(settings, identifier) / "tracks.json").is_file()
+            analyzed = _analysis_matches_settings(
+                run_dir(settings, identifier) / "tracks.json", settings
+            )
             payload.append({**info.to_dict(), "analysis_id": identifier, "analyzed": analyzed})
         return jsonify({"videos": payload})
 
@@ -76,7 +92,7 @@ def create_app(settings: Settings | None = None) -> Flask:
         video_path = resolve_video(settings, str(payload.get("video", "")))
         identifier = analysis_id(video_path)
         tracks_path = run_dir(settings, identifier) / "tracks.json"
-        if tracks_path.is_file():
+        if _analysis_matches_settings(tracks_path, settings):
             return jsonify(
                 {
                     "status": "completed",

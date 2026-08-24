@@ -144,8 +144,11 @@ def build_camera_windows(
             continue
         x1, y1, x2, y2 = (float(value) for value in bbox)
         person_height = max(1.0, y2 - y1)
+        extra_padding = max(0.0, padding - 1.0)
         center_x[index] = (x1 + x2) / 2.0
-        center_y[index] = (y1 + y2) / 2.0
+        # Put roughly two-thirds of the extra vertical room above the performer.
+        # Faces are visually less forgiving than feet when detections move quickly.
+        center_y[index] = (y1 + y2) / 2.0 - person_height * extra_padding * 0.18
         crop_height[index] = np.clip(person_height * padding, minimum_height, maximum_height)
 
     max_gap = max(1, round(fps * 1.2))
@@ -157,9 +160,42 @@ def build_camera_windows(
     crop_height = _smooth(crop_height, alpha=0.10)
 
     windows: list[tuple[int, int, int, int]] = []
-    for cx, cy, height in zip(center_x, center_y, crop_height, strict=True):
+    for index, (cx, cy, height) in enumerate(zip(center_x, center_y, crop_height, strict=True)):
         height = float(np.clip(height, minimum_height, maximum_height))
         width = height * aspect
+
+        # Smoothing must never lag far enough to cut off the current head. Expand
+        # and reposition the window to contain a small safety envelope whenever a
+        # real detection is available. If the full envelope cannot fit, prioritize
+        # the top/head edge.
+        bbox = boxes[index]
+        if bbox is not None:
+            x1, y1, x2, y2 = (float(value) for value in bbox)
+            person_height = max(1.0, y2 - y1)
+            person_width = max(1.0, x2 - x1)
+            safe_top = max(0.0, y1 - person_height * 0.12)
+            safe_bottom = min(float(frame_height), y2 + person_height * 0.04)
+            safe_left = max(0.0, x1 - person_width * 0.06)
+            safe_right = min(float(frame_width), x2 + person_width * 0.06)
+            required_height = max(safe_bottom - safe_top, (safe_right - safe_left) / aspect)
+            height = float(np.clip(max(height, required_height), minimum_height, maximum_height))
+            width = height * aspect
+
+            vertical_lower = safe_bottom - height / 2.0
+            vertical_upper = safe_top + height / 2.0
+            cy = (
+                float(np.clip(cy, vertical_lower, vertical_upper))
+                if vertical_lower <= vertical_upper
+                else safe_top + height / 2.0
+            )
+            horizontal_lower = safe_right - width / 2.0
+            horizontal_upper = safe_left + width / 2.0
+            cx = (
+                float(np.clip(cx, horizontal_lower, horizontal_upper))
+                if horizontal_lower <= horizontal_upper
+                else (safe_left + safe_right) / 2.0
+            )
+
         cx = float(np.clip(cx, width / 2.0, frame_width - width / 2.0))
         cy = float(np.clip(cy, height / 2.0, frame_height - height / 2.0))
         left = round(cx - width / 2.0)

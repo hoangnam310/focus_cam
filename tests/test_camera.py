@@ -58,6 +58,26 @@ def test_camera_windows_stay_inside_source() -> None:
         assert top + height <= 120
 
 
+def test_camera_window_preserves_headroom_after_fast_motion() -> None:
+    frames = [
+        {"index": 0, "detections": [{"track_id": 3, "bbox": [50, 20, 90, 100]}]},
+        {"index": 1, "detections": [{"track_id": 3, "bbox": [50, 80, 90, 160]}]},
+    ]
+    windows = build_camera_windows(
+        frames,
+        [{"frame": 0, "track_id": 3}],
+        frame_width=180,
+        frame_height=220,
+        fps=30,
+        aspect=9 / 16,
+        padding=1.3,
+    )
+    for (_, top, _, height), bbox in zip(windows, ([50, 20, 90, 100], [50, 80, 90, 160])):
+        person_height = bbox[3] - bbox[1]
+        assert top <= bbox[1] - person_height * 0.10
+        assert top + height >= bbox[3]
+
+
 def test_missing_track_is_rejected() -> None:
     with pytest.raises(ValueError, match="does not appear"):
         build_camera_windows(

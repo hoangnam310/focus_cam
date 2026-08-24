@@ -18,9 +18,9 @@ The local browser interface supports:
 - FFmpeg and FFprobe available on `PATH`
 - An Apple Silicon, NVIDIA, or CPU PyTorch installation
 
-The default detector is `yolo11n.pt` with BoT-SORT. Ultralytics downloads the small model
-file on first use. Review the licenses of Ultralytics and any model weights before using
-this in a distributed or commercial product.
+The accuracy-first default is `yolo11s.pt` at 640 pixels with appearance-aware BoT-SORT.
+Ultralytics downloads the model file on first use. Review the licenses of Ultralytics and
+any model weights before using this in a distributed or commercial product.
 
 ## Setup
 
@@ -73,10 +73,10 @@ Environment variables can override the defaults:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `FOCUSCAM_MODEL` | `yolo11n.pt` | Ultralytics detection model |
-| `FOCUSCAM_TRACKER` | `botsort.yaml` | Ultralytics tracker configuration |
+| `FOCUSCAM_MODEL` | `yolo11s.pt` | Ultralytics detection model |
+| `FOCUSCAM_TRACKER` | bundled BoT-SORT ReID config | Ultralytics tracker configuration |
 | `FOCUSCAM_DEVICE` | auto | `cpu`, `mps`, or a CUDA device such as `0` |
-| `FOCUSCAM_IMAGE_SIZE` | `512` | Detector input size; larger is slower but finds smaller people |
+| `FOCUSCAM_IMAGE_SIZE` | `640` | Detector input size; larger is slower but finds smaller people |
 | `FOCUSCAM_ROOT` | project root | Directory scanned for source videos |
 | `FOCUSCAM_RUNS_DIR` | `runs/` | Generated analysis and output directory |
 
@@ -90,3 +90,6 @@ ruff check src tests
 The code separates tracking, selection, camera-path generation, and rendering so future
 versions can add scene boundaries, track-fragment merging, pose-aware framing, or a
 different detector without replacing the interface.
+
+For a faster, lower-accuracy analysis, use `FOCUSCAM_MODEL=yolo11n.pt` and
+`FOCUSCAM_IMAGE_SIZE=512`.

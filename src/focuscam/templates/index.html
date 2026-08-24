@@ -49,6 +49,9 @@
               <span class="status-dot"></span>
               <span id="selection-label">No performer selected</span>
             </div>
+            <button class="secondary-button" id="pick-button" type="button" aria-pressed="false" disabled>
+              Select performer on video
+            </button>
             <label class="toggle-row">
               <input type="checkbox" id="show-tracks" checked>
               <span class="toggle"><i></i></span>
@@ -101,7 +104,7 @@
               <strong>Select a performance to begin</strong>
               <p>The original video stays on this computer.</p>
             </div>
-            <div class="stage-hint hidden" id="stage-hint">Pause, then click the performer to follow</div>
+            <div class="stage-hint hidden" id="stage-hint">Click the performer to follow · Esc to cancel</div>
           </div>
 
           <section class="track-section hidden" id="track-section">
