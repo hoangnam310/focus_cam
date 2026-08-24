@@ -6,10 +6,11 @@ from typing import Any
 
 from flask import Flask, abort, jsonify, render_template, request, send_file
 
+from .camera import normalize_anchors, normalize_crop_anchors
 from .config import Settings
 from .jobs import JobManager
 from .renderer import render_focus_cam
-from .storage import analysis_id, list_videos, read_json, resolve_video, run_dir
+from .storage import analysis_id, list_videos, read_json, resolve_video, run_dir, write_json
 from .tracker import analyze_video
 from .video import probe_video
 
@@ -44,6 +45,45 @@ def _analysis_matches_settings(path: Path, settings: Settings) -> bool:
         and payload.get("tracker") == settings.tracker
         and int(payload.get("image_size", 0)) == settings.image_size
     )
+
+
+def _normalize_selection(payload: dict[str, Any], analysis: dict[str, Any]) -> dict[str, Any]:
+    raw_anchors = payload.get("anchors", [])
+    raw_crop_anchors = payload.get("crop_anchors", [])
+    if not isinstance(raw_anchors, list):
+        raise TypeError("anchors must be a list")
+    if not isinstance(raw_crop_anchors, list):
+        raise TypeError("crop_anchors must be a list")
+
+    frame_count = len(analysis.get("frames", []))
+    known_tracks = {int(track["track_id"]) for track in analysis.get("tracks", [])}
+    anchors: list[dict[str, Any]] = []
+    if raw_anchors:
+        for anchor in normalize_anchors(raw_anchors, frame_count):
+            if anchor.track_id is not None and anchor.track_id not in known_tracks:
+                raise ValueError(f"Track {anchor.track_id} does not appear in this analysis")
+            normalized: dict[str, Any] = {"frame": anchor.frame, "track_id": anchor.track_id}
+            if anchor.track_id is None:
+                normalized["mode"] = "absent"
+            anchors.append(normalized)
+
+    crop_anchors = [
+        {
+            "frame": anchor.frame,
+            "mode": anchor.mode,
+            **(
+                {
+                    "offset_x": anchor.offset_x,
+                    "offset_y": anchor.offset_y,
+                    "scale": anchor.scale,
+                }
+                if anchor.mode == "manual"
+                else {}
+            ),
+        }
+        for anchor in normalize_crop_anchors(raw_crop_anchors, frame_count)
+    ]
+    return {"anchors": anchors, "crop_anchors": crop_anchors}
 
 
 def create_app(settings: Settings | None = None) -> Flask:
@@ -120,10 +160,25 @@ def create_app(settings: Settings | None = None) -> Flask:
 
     @app.get("/api/analyses/<identifier>")
     def analysis(identifier: str):
-        path = run_dir(settings, identifier) / "tracks.json"
+        directory = run_dir(settings, identifier)
+        path = directory / "tracks.json"
         if not path.is_file():
             abort(404)
-        return jsonify(read_json(path))
+        payload = read_json(path)
+        selection_path = directory / "selection.json"
+        if selection_path.is_file():
+            payload["selection"] = read_json(selection_path)
+        return jsonify(payload)
+
+    @app.post("/api/analyses/<identifier>/selection")
+    def save_selection(identifier: str):
+        directory = run_dir(settings, identifier)
+        path = directory / "tracks.json"
+        if not path.is_file():
+            abort(404)
+        selection = _normalize_selection(_json_body(), read_json(path))
+        write_json(directory / "selection.json", selection)
+        return jsonify(selection)
 
     @app.get("/api/analyses/<identifier>/assets/<path:filename>")
     def analysis_asset(identifier: str, filename: str):

@@ -10,6 +10,7 @@ const state = {
   cropMode: false,
   cropEditFrame: null,
   cropDrag: null,
+  timelineSaveTimer: null,
   activeJob: null,
 };
 
@@ -21,7 +22,8 @@ const elements = {
   pick: $("#pick-button"), absent: $("#absent-button"),
   selectionLabel: $("#selection-label"), selectionState: $(".selection-state"),
   showTracks: $("#show-tracks"), showCrop: $("#show-crop"),
-  anchors: $("#anchors"), aspect: $("#aspect-select"),
+  anchors: $("#anchors"), selectionWarning: $("#selection-warning"),
+  aspect: $("#aspect-select"),
   padding: $("#padding-select"), crop: $("#crop-button"), cropControls: $("#crop-controls"),
   cropScale: $("#crop-scale"), cropScaleValue: $("#crop-scale-value"),
   cropAuto: $("#crop-auto-button"), cropAnchors: $("#crop-anchors"),
@@ -170,10 +172,25 @@ function timelineKey() {
 
 function persistTimeline() {
   const key = timelineKey();
-  if (key) localStorage.setItem(key, JSON.stringify({
+  if (!key) return;
+  const payload = {
     anchors: state.anchors,
     crop_anchors: state.cropAnchors,
-  }));
+  };
+  localStorage.setItem(key, JSON.stringify(payload));
+  window.clearTimeout(state.timelineSaveTimer);
+  const analysisId = state.analysis.analysis_id;
+  state.timelineSaveTimer = window.setTimeout(async () => {
+    try {
+      const saved = await requestJSON(`/api/analyses/${analysisId}/selection`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (state.analysis?.analysis_id === analysisId) state.analysis.selection = saved;
+    } catch (error) {
+      console.warn("Could not save the focus-cam timeline to the project", error);
+    }
+  }, 150);
 }
 
 function restoreTimeline() {
@@ -182,7 +199,8 @@ function restoreTimeline() {
   const key = timelineKey();
   if (!key) return;
   try {
-    const saved = JSON.parse(localStorage.getItem(key) || "[]");
+    const saved = state.analysis.selection
+      || JSON.parse(localStorage.getItem(key) || "[]");
     const savedAnchors = Array.isArray(saved) ? saved : saved.anchors;
     const savedCropAnchors = Array.isArray(saved) ? [] : saved.crop_anchors;
     if (!Array.isArray(savedAnchors)) return;
@@ -320,14 +338,39 @@ function setCropMode(enabled) {
   drawOverlay();
 }
 
+function timelineIssue() {
+  if (!state.analysis || !state.anchors.length) return null;
+  const tolerance = Math.max(1, Math.round(state.analysis.source.fps * 1.2));
+  const tracks = new Map(state.analysis.tracks.map((track) => [Number(track.track_id), track]));
+  for (let index = 0; index < state.anchors.length; index += 1) {
+    const anchor = state.anchors[index];
+    if (anchor.track_id === null) continue;
+    const track = tracks.get(Number(anchor.track_id));
+    if (!track) return `Track ${anchor.track_id} is not available in this analysis.`;
+    const nextAnchor = state.anchors[index + 1];
+    const segmentEnd = nextAnchor
+      ? nextAnchor.frame - 1
+      : state.analysis.frames.length - 1;
+    if (Number(track.last_frame) < segmentEnd - tolerance) {
+      const endedAt = Number(track.last_frame) / state.analysis.source.fps;
+      return `Track ${anchor.track_id} ends at ${formatTime(endedAt)}. Add the next track or mark the performer off-screen before rendering.`;
+    }
+  }
+  return null;
+}
+
 function renderSelection() {
   const hasTimeline = state.anchors.length > 0;
   const hasTarget = state.anchors.some((anchor) => anchor.track_id !== null);
+  const issue = timelineIssue();
   if (!hasTarget && state.cropMode) setCropMode(false);
   elements.selectionState.classList.toggle("chosen", hasTimeline);
   elements.exportStep.classList.toggle("disabled", !hasTarget);
-  elements.render.disabled = !hasTarget;
+  elements.render.disabled = !hasTarget || Boolean(issue);
+  elements.render.title = issue || "";
   elements.crop.disabled = !hasTarget;
+  elements.selectionWarning.textContent = issue || "";
+  elements.selectionWarning.classList.toggle("hidden", !issue);
   elements.anchors.replaceChildren();
   state.anchors.forEach((anchor, index) => {
     const row = document.createElement("div");

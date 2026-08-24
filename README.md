@@ -9,6 +9,7 @@ The local browser interface supports:
 - click-to-follow selection directly on the video;
 - a thumbnail gallery of every detected track;
 - a persistent timeline of track changes after overlaps or cuts;
+- an incomplete-timeline warning when a selected track ends before the performance;
 - explicit off-screen segments that ease to a centered wide-stage frame;
 - a live output-crop preview centered on the selected bounding box;
 - draggable, resizable crop corrections that keep the chosen aspect ratio;
@@ -58,9 +59,10 @@ performers**. After analysis:
    moment forward; use **Return to auto framing** when it should end.
 6. Render the focus cam.
 
-Analysis files, thumbnails, and exports are written under `runs/`. The performer timeline
-and manual crop corrections are saved in local browser storage for each analysis. Source
-media, model weights, and generated files are ignored by Git.
+Analysis files, thumbnails, exports, and the current manual selection are written under
+`runs/`. The performer timeline and crop corrections are also cached in browser storage,
+so the project selection survives both reloads and a different browser. Source media, model
+weights, and generated files are ignored by Git.
 
 ## Command-line analysis
 
